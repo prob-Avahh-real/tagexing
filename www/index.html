@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>线条音乐侠 · Line Rider</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a12;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;font-family:"PingFang SC","Microsoft YaHei",sans-serif}
+canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%}
+#hud{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:10;pointer-events:none;color:#8090b0;font-size:12px;display:flex;gap:16px}
+#btns{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);z-index:10;display:flex;gap:8px}
+.btn{padding:8px 16px;border-radius:20px;background:rgba(20,20,40,.9);border:1px solid#303050;color:#a0b0d0;font-size:12px;cursor:pointer}
+.btn.play{background:rgba(30,50,30,.9);border-color:#408040;color:#80e080}.btn:active{transform:scale(.95)}
+#help{position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);z-index:20;pointer-events:none;color:#404060;font-size:14px;text-align:center}
+@media(max-width:400px){.btn{font-size:10px;padding:6px 10px}}
+</style>
+</head>
+<body>
+<div id="hud"><span id="speed">⚡ 0</span><span id="len">📏 0m</span></div>
+<div id="help">🖊️ 用手指画线<br>▶️ 点播放看小人滑行</div>
+<div id="song-bar" style="position:absolute;top:30px;left:50%;transform:translateX(-50%);z-index:10;display:flex;gap:4px;overflow-x:auto;max-width:90%;padding:4px">
+  <select id="song-select" style="background:#141428;border:1px solid#303050;color:#a0b0d0;border-radius:8px;padding:4px 8px;font-size:11px;max-width:180px" onchange="pickSong()"></select>
+  <button class="btn" id="sync-btn" onclick="toggleBeatSync()" style="font-size:10px;padding:4px 8px">🥁 节拍</button>
+</div>
+<div id="btns">
+  <button class="btn" onclick="clearAll()">✕ 清空</button>
+  <button class="btn play" id="play-btn" onclick="togglePlay()">▶ 播放</button>
+  <button class="btn" onclick="undoLine()">↩ 撤销</button>
+</div>
+<canvas id="game"></canvas>
+<script>
+// ==================== GAME STATE ====================
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+let W,H,lines=[],currentLine=null,drawing=false,playing=false,rider=null,trail=[],animId=null,lastTime=0;
+
+// ==================== SONG LIBRARY (44 tracks) ====================
+const SONGS=[{id:"spring",title:"春 (四季)",bpm:98},{id:"summer",title:"夏 (四季)",bpm:140},{id:"autumn",title:"秋 (四季)",bpm:112},{id:"winter",title:"冬 (四季)",bpm:140},{id:"moonlight",title:"月光奏鸣曲",bpm:72},{id:"fur-elise",title:"致爱丽丝",bpm:120},{id:"turkish",title:"土耳其进行曲",bpm:130},{id:"canon",title:"卡农",bpm:96},{id:"blue-danube",title:"蓝色多瑙河",bpm:160},{id:"radetzky",title:"拉德茨基进行曲",bpm:120},{id:"nutcracker",title:"胡桃夹子",bpm:130},{id:"swan-lake",title:"天鹅湖",bpm:80},{id:"morning",title:"培尔金特·晨曲",bpm:70},{id:"hall-of-mountain",title:"在山魔王的宫殿",bpm:140},{id:"eine-kleine",title:"小夜曲",bpm:128},{id:"symphony5",title:"命运交响曲",bpm:108},{id:"ode-to-joy",title:"欢乐颂",bpm:120},{id:"clair-de-lune",title:"月光",bpm:72},{id:"rondo-alla-turca",title:"土耳其回旋曲",bpm:130},{id:"minuet",title:"小步舞曲",bpm:110},{id:"nocturne",title:"夜曲 Op.9 No.2",bpm:66},{id:"revolutionary",title:"革命练习曲",bpm:160},{id:"fantasie",title:"幻想即兴曲",bpm:84},{id:"polonaise",title:"英雄波兰舞曲",bpm:100},{id:"waltz-op64",title:"小狗圆舞曲",bpm:180},{id:"raindrop",title:"雨滴前奏曲",bpm:80},{id:"tristesse",title:"离别练习曲",bpm:70},{id:"bolero",title:"波莱罗舞曲",bpm:72},{id:"pictures",title:"图画展览会",bpm:100},{id:"flight-bumblebee",title:"野蜂飞舞",bpm:180},{id:"hungarian",title:"匈牙利舞曲",bpm:140},{id:"slavonic",title:"斯拉夫舞曲",bpm:130},{id:"piano-concerto",title:"第一钢琴协奏曲",bpm:110},{id:"violin-concerto",title:"小提琴协奏曲",bpm:90},{id:"requiem",title:"安魂曲",bpm:60},{id:"ave-maria",title:"圣母颂",bpm:66},{id:"carmen",title:"卡门序曲",bpm:128},{id:"william-tell",title:"威廉退尔序曲",bpm:150},{id:"barber-of-seville",title:"塞维利亚理发师",bpm:130},{id:"ride-of-valkyries",title:"女武神的骑行",bpm:110},{id:"also-sprach",title:"查拉图斯特拉如是说",bpm:80},{id:"beauty-beast",title:"美女与野兽",bpm:104},{id:"whole-new-world",title:"全新世界",bpm:112},{id:"let-it-go",title:"Let It Go",bpm:136}];
+let curSong=SONGS[0],beatSync=false,beatPhase=0,lastBeatTime=0;
+function pickSong(){const s=SONGS.find(s=>s.title===document.getElementById("song-select").value);if(s)curSong=s}
+function toggleBeatSync(){beatSync=!beatSync;document.getElementById("sync-btn").style.background=beatSync?"rgba(40,60,30,.9)":"rgba(20,20,40,.9)"}
+function getBeatPulse(){if(!beatSync)return 0;const now=performance.now()/1000;const beatDur=60/curSong.bpm;if(now-lastBeatTime>beatDur){lastBeatTime=now;beatPhase=(beatPhase+1)%4}return Math.max(0,1-(now-lastBeatTime)/beatDur*.3)}
+
+function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight}
+window.addEventListener("resize",resize);resize();
+
+// ==================== INPUT ====================
+canvas.addEventListener("pointerdown",e=>{if(playing)return;document.getElementById("help").style.display="none";
+  drawing=true;currentLine={pts:[{x:e.clientX,y:e.clientY}],color:hsl2hex(Math.random()*360,70,60)};lines.push(currentLine)});
+canvas.addEventListener("pointermove",e=>{if(!drawing||!currentLine)return;
+  currentLine.pts.push({x:e.clientX,y:e.clientY})});
+canvas.addEventListener("pointerup",()=>{drawing=false;currentLine=null;updateHUD()});
+canvas.addEventListener("pointerleave",()=>{drawing=false;currentLine=null});
+
+// ==================== PHYSICS ====================
+function createRider(){return{x:lines[0]?.pts[0]?.x||W*.3,y:(lines[0]?.pts[0]?.y||H*.5)-20,vx:3,vy:0,angle:0,alive:true}}
+
+function findGround(x,y){
+  let best=null,bestDist=Infinity;
+  for(const l of lines){for(let i=1;i<l.pts.length;i++){const a=l.pts[i-1],b=l.pts[i];
+    const dx=b.x-a.x,dy=b.y-a.y,len=Math.sqrt(dx*dx+dy*dy);if(len<2)continue;
+    const t=Math.max(0,Math.min(1,((x-a.x)*dx+(y-a.y)*dy)/(len*len)));
+    const px=a.x+t*dx,py=a.y+t*dy;const dist=Math.sqrt((x-px)**2+(y-py)**2);
+    if(dist<bestDist&&dist<25){bestDist=dist;best={x:px,y:py,dx:dx/len,dy:dy/len}}}}
+  return best}
+
+function updatePhysics(dt){
+  if(!rider||!rider.alive)return;const bpmFactor=curSong.bpm/120;const subSteps=4;const subDt=dt/subSteps;
+  for(let s=0;s<subSteps;s++){rider.vy+=400*bpmFactor*subDt;rider.x+=rider.vx*subDt;rider.y+=rider.vy*subDt;
+    const g=findGround(rider.x,rider.y+15);if(g){const dist=g.y-rider.y;
+      if(dist>=0&&dist<=20){rider.y=g.y-12;rider.vy=-rider.vy*.3;rider.vx+=g.dx*200*subDt;
+        rider.angle=Math.atan2(g.dy,g.dx);trail.push({x:rider.x,y:rider.y,l:.8})}
+      else if(dist<0&&Math.abs(dist)<10&&rider.vy<0){rider.vy=0}}
+    if(rider.y>H+100||rider.x<-100||rider.x>W+100)rider.alive=false}
+  rider.vx*=0.998;trail.forEach(t=>t.l-=.02);trail=trail.filter(t=>t.l>0)}
+
+// ==================== RENDER ====================
+function render(){ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0a0a12";ctx.fillRect(0,0,W,H);
+  // Grid
+  ctx.strokeStyle="#151520";ctx.lineWidth=.5;for(let x=0;x<W;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}
+  for(let y=0;y<H;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+  // Lines
+  for(const l of lines){ctx.strokeStyle=l.color||"#4080c0";ctx.lineWidth=3;ctx.lineCap="round";ctx.lineJoin="round";
+    ctx.beginPath();ctx.moveTo(l.pts[0].x,l.pts[0].y);for(let i=1;i<l.pts.length;i++)ctx.lineTo(l.pts[i].x,l.pts[i].y);ctx.stroke()}
+  // Current drawing line
+  if(drawing&&currentLine&&currentLine.pts.length>0){ctx.strokeStyle="#ffffff44";ctx.lineWidth=2;ctx.beginPath();
+    ctx.moveTo(currentLine.pts[0].x,currentLine.pts[0].y);for(let i=1;i<currentLine.pts.length;i++)ctx.lineTo(currentLine.pts[i].x,currentLine.pts[i].y);ctx.stroke()}
+  // Trail
+  for(let i=0;i<trail.length;i++){const t=trail[i];ctx.fillStyle=`rgba(255,220,100,${t.l})`;ctx.beginPath();ctx.arc(t.x,t.y,3,0,Math.PI*2);ctx.fill()}
+  // Rider
+  if(rider&&rider.alive){ctx.save();ctx.translate(rider.x,rider.y);ctx.rotate(rider.angle);
+    ctx.fillStyle="#ffa040";ctx.fillRect(-8,-6,16,12);ctx.fillStyle="#ff8040";ctx.fillRect(-3,-8,6,14);ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(-2,-9,2,0,Math.PI*2);ctx.fill();ctx.fill();ctx.beginPath();ctx.arc(2,-9,2,0,Math.PI*2);ctx.fill();ctx.restore()}}
+
+// ==================== CONTROLS ====================
+function togglePlay(){
+  if(playing){playing=false;if(animId)cancelAnimationFrame(animId);document.getElementById("play-btn").textContent="▶ 播放";document.getElementById("play-btn").classList.add("play");return}
+  if(lines.length===0)return;playing=true;rider=createRider();trail=[];lastTime=performance.now();
+  document.getElementById("play-btn").textContent="⏸ 暂停";document.getElementById("play-btn").classList.remove("play");
+  document.getElementById("help").style.display="none";loop(lastTime)}
+
+function clearAll(){playing=false;if(animId)cancelAnimationFrame(animId);lines=[];rider=null;trail=[];
+  document.getElementById("play-btn").textContent="▶ 播放";document.getElementById("play-btn").classList.add("play");
+  document.getElementById("help").style.display="block";updateHUD()}
+
+function undoLine(){if(playing)return;lines.pop();updateHUD()}
+
+function updateHUD(){document.getElementById("len").textContent="📏 "+lines.length+"条"}
+function hsl2hex(h,s,l){const c=(1-Math.abs(2*l-1))*s,x=c*(1-Math.abs((h/60)%2-1)),m=l-c/2;const[r,g,b]=h<60?[c,x,0]:h<120?[x,c,0]:h<180?[0,c,x]:h<240?[0,x,c]:h<300?[x,0,c]:[c,0,x];
+  return"#"+[r,g,b].map(v=>Math.round((v+m)*255).toString(16).padStart(2,"0")).join("")}
+
+// ==================== GAME LOOP ====================
+function loop(now){
+  const dt=Math.min((now-lastTime)/1000,.05);lastTime=now;
+  updatePhysics(dt);render();
+  document.getElementById("speed").textContent="⚡ "+(rider?Math.round(Math.sqrt(rider.vx**2+rider.vy**2)):0);
+  if(rider&&!rider.alive){playing=false;document.getElementById("play-btn").textContent="▶ 播放";document.getElementById("play-btn").classList.add("play")}
+  // Beat pulse effect
+  const pulse=getBeatPulse();if(pulse>.1){ctx.fillStyle=`rgba(255,200,80,${pulse*.15})`;ctx.fillRect(0,0,W,H)}
+  document.getElementById("speed").textContent="⚡ "+(rider?Math.round(Math.sqrt(rider.vx**2+rider.vy**2)):0)+" @"+curSong.bpm+"BPM";
+  animId=requestAnimationFrame(loop)}
+
+// Init song picker
+const sel=document.getElementById("song-select");SONGS.forEach(s=>{const o=document.createElement("option");o.value=s.title;o.text=s.title+" ("+s.bpm+"BPM)";sel.appendChild(o)});
+sel.value=curSong.title;
+</script>
+</body>
+</html>
