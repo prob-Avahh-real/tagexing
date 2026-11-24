@@ -14,9 +14,21 @@ canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%}
 .btn.play{background:rgba(30,50,30,.9);border-color:#408040;color:#80e080}.btn:active{transform:scale(.95)}
 #help{position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);z-index:20;pointer-events:none;color:#404060;font-size:14px;text-align:center}
 @media(max-width:400px){.btn{font-size:10px;padding:6px 10px}}
+@media(max-width:280px),(max-height:300px){
+  #hud{font-size:9px;gap:8px;top:4px}
+  #song-bar{top:22px;max-width:98%}
+  #btns{bottom:6px;gap:4px}
+  .btn{font-size:9px;padding:4px 8px}
+  #help{font-size:11px}
+  #wear{font-size:9px;gap:4px}
+}
+#wear{position:absolute;top:8px;right:8px;z-index:12;display:flex;flex-direction:column;gap:4px}
+#wear .chip{padding:4px 8px;border-radius:10px;background:rgba(20,20,40,.85);border:1px solid#303050;color:#606880;font-size:10px}
+#wear .chip.on{color:#80e080;border-color:#408040}
 </style>
 </head>
 <body>
+<div id="wear"><span class="chip" id="ring-status">💍</span><span class="chip" id="cane-status">🦯</span></div>
 <div id="hud"><span id="speed">⚡ 0</span><span id="len">📏 0m</span></div>
 <div id="help">🖊️ 用手指画线<br>▶️ 点播放看小人滑行</div>
 <div id="song-bar" style="position:absolute;top:30px;left:50%;transform:translateX(-50%);z-index:10;display:flex;gap:4px;overflow-x:auto;max-width:90%;padding:4px">
@@ -123,6 +135,58 @@ function loop(now){
 // Init song picker
 const sel=document.getElementById("song-select");SONGS.forEach(s=>{const o=document.createElement("option");o.value=s.title;o.text=s.title+" ("+s.bpm+"BPM)";sel.appendChild(o)});
 sel.value=curSong.title;
+
+// ==================== WEARABLE (ring / cane) ====================
+let ringActive=false,ringFrame=0,ringPrevGamma=null;
+let caneActive=false,caneFrame=0,caneLast={x:0,y:0,z:0};
+function setWearChip(id,on,label){
+  const el=document.getElementById(id);if(!el)return;
+  el.className="chip"+(on?" on":"");el.textContent=label;
+}
+function initRing(){
+  if(typeof DeviceOrientationEvent==="undefined")return;
+  const b=document.getElementById("ring-status");
+  if(typeof DeviceOrientationEvent.requestPermission==="function"){
+    setWearChip("ring-status",false,"💍 点此");
+    b.style.cursor="pointer";
+    b.onclick=async()=>{try{const p=await DeviceOrientationEvent.requestPermission();if(p==="granted"){ringActive=true;setWearChip("ring-status",true,"💍 已连");b.onclick=null}}catch(_){}};
+  }else{ringActive=true;setWearChip("ring-status",true,"💍 已连")}
+  window.addEventListener("deviceorientation",onRing);
+}
+function onRing(e){
+  if(!ringActive)return;
+  ringFrame++;if(ringFrame%8!==0)return;
+  const beta=e.beta||0,gamma=e.gamma||0;
+  if(Math.abs(beta)>20||Math.abs(gamma)>20){undoLine();return}
+  if(ringPrevGamma===null){ringPrevGamma=gamma;return}
+  const dG=gamma-ringPrevGamma;ringPrevGamma=gamma;
+  if(Math.abs(dG)>5){
+    const i=sel.selectedIndex;
+    sel.selectedIndex=Math.max(0,Math.min(sel.options.length-1,i+(dG>0?1:-1)));
+    pickSong();
+  }
+}
+function initCane(){
+  if(typeof DeviceMotionEvent==="undefined")return;
+  const b=document.getElementById("cane-status");
+  if(typeof DeviceMotionEvent.requestPermission==="function"){
+    setWearChip("cane-status",false,"🦯 点此");
+    b.style.cursor="pointer";
+    b.onclick=async()=>{try{const p=await DeviceMotionEvent.requestPermission();if(p==="granted"){caneActive=true;setWearChip("cane-status",true,"🦯 已连");b.onclick=null}}catch(_){}};
+  }else{caneActive=true;setWearChip("cane-status",true,"🦯 已连")}
+  window.addEventListener("devicemotion",onCane);
+}
+function onCane(e){
+  if(!caneActive)return;
+  caneFrame++;if(caneFrame%6!==0)return;
+  const a=e.accelerationIncludingGravity||e.acceleration;if(!a)return;
+  const ax=a.x||0,ay=a.y||0,az=a.z||0;
+  const spike=Math.abs(ax-caneLast.x)+Math.abs(ay-caneLast.y)+Math.abs(az-caneLast.z);
+  caneLast={x:ax,y:ay,z:az};
+  if(spike>8)togglePlay();
+  else if(Math.abs(ax)>3&&!playing)clearAll();
+}
+initRing();initCane();
 </script>
 </body>
 </html>
